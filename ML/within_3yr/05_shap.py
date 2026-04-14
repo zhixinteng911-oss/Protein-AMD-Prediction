@@ -29,7 +29,7 @@ WINDOW = "within_3yr"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate SHAP plots for the within-3-year full-data 5-fold OOF model.")
+    parser = argparse.ArgumentParser(description="Generate SHAP plots for the within-3-year 5-fold OOF model.")
     parser.add_argument("--input-file", required=True)
     parser.add_argument("--base-out", default="outputs")
     parser.add_argument("--device", choices=["cpu", "gpu", "cuda"], default="cpu")

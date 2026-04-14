@@ -3,7 +3,7 @@
 This `ML/` tree contains one publication-facing pipeline:
 
 - `elastic-net rerank`
-- `full-data 5-fold LightGBM SFS`
+- `5-fold LightGBM SFS`
 - `5-fold OOF ROC`
 - `fold-aggregated SHAP`
 

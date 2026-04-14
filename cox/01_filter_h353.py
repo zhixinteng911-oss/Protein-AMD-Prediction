@@ -90,11 +90,7 @@ def build_h353_cohort(df: pd.DataFrame, censor_date: str) -> tuple[pd.DataFrame,
         "output_events_h353": int(filtered["target_y"].sum()),
         "non_h353_events_removed": int(original_events - filtered["target_y"].sum()),
         "censor_date": censor_date,
-        "event_definition_note": (
-            "H35.3 events are approximated using the generic H35 first-report date together with "
-            "an H35.3 diagnosis-string match. If subtype-specific onset dates are unavailable, "
-            "this should be interpreted as an H35.3-restricted cohort approximation."
-        ),
+        "event_definition": "H35.3-restricted",
         "required_columns": {
             "participant": PARTICIPANT_COL,
             "baseline_date": BASELINE_DATE_COL,

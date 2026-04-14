@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run full-data 5-fold sequential forward selection for within_3yr."""
+"""Run 5-fold sequential forward selection for within_3yr."""
 
 import argparse
 from pathlib import Path

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render full-data 5-fold OOF ROC curves for the within_3yr pipeline."""
+"""Render 5-fold OOF ROC curves for the within_3yr pipeline."""
 
 import argparse
 from pathlib import Path
@@ -54,7 +54,7 @@ def build_cross_terms(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot full-data 5-fold OOF ROC curves for the within-3-year model.")
+    parser = argparse.ArgumentParser(description="Plot 5-fold OOF ROC curves for the within-3-year model.")
     parser.add_argument("--input-file", required=True)
     parser.add_argument("--base-out", default="outputs")
     parser.add_argument("--device", choices=["cpu", "gpu", "cuda"], default="cpu")
