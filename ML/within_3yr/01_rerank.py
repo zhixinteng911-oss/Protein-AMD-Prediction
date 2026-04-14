@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""Elastic-net reranking for the canonical within_3yr prediction pipeline."""
+
+from __future__ import annotations
 
 import argparse
 from pathlib import Path
@@ -8,50 +11,41 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import pandas as pd
-from sklearn.metrics import roc_auc_score
-
-from shared import LGBM_PROTEIN_PARAMS, fit_model, get_output_dir, make_folds, prepare_payload, predict_model
+from shared import (
+    get_output_dir,
+    make_folds,
+    prepare_prediction_payload,
+    rank_features_elasticnet_cv,
+)
 
 WINDOW = "within_3yr"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Re-rank proteins for the within-3-year model.")
+    parser = argparse.ArgumentParser(description="Elastic-net rerank for the within_3yr prediction pipeline.")
     parser.add_argument("--input-file", required=True)
     parser.add_argument("--base-out", default="outputs")
-    parser.add_argument("--device", choices=["cpu", "gpu", "cuda"], default="cpu")
+    parser.add_argument("--seed", type=int, default=5)
+    parser.add_argument("--c", type=float, default=0.1)
+    parser.add_argument("--l1-ratio", type=float, default=0.5)
     args = parser.parse_args()
 
-    payload = prepare_payload(args.input_file, WINDOW)
+    payload = prepare_prediction_payload(args.input_file, WINDOW)
     out_dir = get_output_dir(args.base_out, WINDOW)
     x_protein = payload["X_protein"]
     y = payload["y"]
-    folds = make_folds(y, strict=True, label="feature re-ranking")
-    params = {**LGBM_PROTEIN_PARAMS, "device": args.device}
+    folds = make_folds(y, strict=True, label="elasticnet feature rerank")
 
-    rank_res = []
-    for fold, (train_idx, val_idx) in enumerate(folds, start=1):
-        x_train = x_protein.iloc[train_idx]
-        x_val = x_protein.iloc[val_idx]
-        y_train = y.iloc[train_idx].to_numpy(dtype=int)
-        y_val = y.iloc[val_idx].to_numpy(dtype=int)
-
-        model, means = fit_model(x_train, y_train, params)
-        rank_res.append(
-            pd.Series(
-                model.booster_.feature_importance(importance_type="gain"),
-                index=x_protein.columns,
-            )
-        )
-        y_pred = predict_model(model, x_val, means)
-        print(f"Fold {fold}/{len(folds)} - AUC: {roc_auc_score(y_val, y_pred):.4f}")
-
-    avg_gain = pd.concat(rank_res, axis=1).mean(axis=1).sort_values(ascending=False)
-    rank_df = avg_gain.reset_index()
-    rank_df.columns = ["Features", "Gain"]
-    rank_df["Cover"] = rank_df["Gain"] / rank_df["Gain"].max()
+    rank_df = rank_features_elasticnet_cv(
+        x_protein,
+        y,
+        folds,
+        random_state=args.seed,
+        c=args.c,
+        l1_ratio=args.l1_ratio,
+    )
     rank_df.to_csv(out_dir / "s03_reranked.csv", index=False)
+    print(rank_df.head(20).to_string(index=False))
 
 
 if __name__ == "__main__":

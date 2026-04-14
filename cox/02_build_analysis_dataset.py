@@ -88,23 +88,31 @@ def process_continuous_features(df: pd.DataFrame) -> pd.DataFrame:
         if source not in df.columns:
             raise ValueError(f"Required continuous column missing: {source}")
         values = safe_numeric(df[source])
-        values = values.fillna(values.median())
+        valid = values.notna()
+        if not valid.any():
+            raise ValueError(f"Column {source} has no non-missing values.")
+        transformed = values.copy()
         if transform == "log":
-            values = np.log(values + 1.0)
+            transformed.loc[valid] = np.log(values.loc[valid] + 1.0)
         elif transform == "rankn":
-            ranks = stats.rankdata(values)
-            values = pd.Series(stats.norm.ppf(ranks / (len(ranks) + 1)), index=df.index)
-        std = values.std(ddof=0)
+            valid_values = values.loc[valid]
+            ranks = stats.rankdata(valid_values)
+            transformed = pd.Series(np.nan, index=df.index, dtype=float)
+            transformed.loc[valid] = stats.norm.ppf(ranks / (len(ranks) + 1))
+        std = transformed.loc[valid].std(ddof=0)
         if std == 0:
             raise ValueError(f"Column {source} has zero variance after preprocessing.")
-        df[target] = (values - values.mean()) / std
+        mean = transformed.loc[valid].mean()
+        scaled = pd.Series(np.nan, index=df.index, dtype=float)
+        scaled.loc[valid] = (transformed.loc[valid] - mean) / std
+        df[target] = scaled
     return df
 
 
 def process_categorical_features(df: pd.DataFrame) -> pd.DataFrame:
     if "f_31" in df.columns:
-        sex = df["f_31"].fillna(df["f_31"].mode().iloc[0]).astype(str)
-        df["sex_binary"] = pd.to_numeric(
+        sex = df["f_31"].astype(str)
+        sex_values = pd.to_numeric(
             sex.map(
                 {
                     "Female": 0,
@@ -122,10 +130,11 @@ def process_categorical_features(df: pd.DataFrame) -> pd.DataFrame:
                 }
             ),
             errors="coerce",
-        ).fillna(0).astype(int)
+        )
+        df["sex_binary"] = sex_values
 
     if "f_20116_0" in df.columns:
-        smoke = df["f_20116_0"].fillna(df["f_20116_0"].mode().iloc[0])
+        smoke = df["f_20116_0"]
         smoke_map = {
             "Never": 0,
             "never": 0,
@@ -148,12 +157,15 @@ def process_categorical_features(df: pd.DataFrame) -> pd.DataFrame:
             "2": 2,
             "2.0": 2,
         }
-        smoke_values = pd.to_numeric(smoke.astype(str).map(smoke_map), errors="coerce").fillna(0)
-        df["smoker_current"] = (smoke_values == 2).astype(int)
-        df["smoker_former"] = (smoke_values == 1).astype(int)
+        smoke_values = pd.to_numeric(smoke.astype(str).map(smoke_map), errors="coerce")
+        df["smoker_current"] = pd.Series(np.nan, index=df.index, dtype=float)
+        df["smoker_former"] = pd.Series(np.nan, index=df.index, dtype=float)
+        known = smoke_values.notna()
+        df.loc[known, "smoker_current"] = (smoke_values.loc[known] == 2).astype(int)
+        df.loc[known, "smoker_former"] = (smoke_values.loc[known] == 1).astype(int)
 
     if "f_1558_0" in df.columns:
-        alcohol = df["f_1558_0"].fillna(df["f_1558_0"].mode().iloc[0])
+        alcohol = df["f_1558_0"]
         alcohol_map = {
             "Never": 0,
             "never": 0,
@@ -172,8 +184,10 @@ def process_categorical_features(df: pd.DataFrame) -> pd.DataFrame:
             "4": 4,
             "5": 5,
         }
-        alcohol_values = pd.to_numeric(alcohol.astype(str).map(alcohol_map), errors="coerce").fillna(0)
-        df["alcohol_frequent"] = (alcohol_values >= 3).astype(int)
+        alcohol_values = pd.to_numeric(alcohol.astype(str).map(alcohol_map), errors="coerce")
+        df["alcohol_frequent"] = pd.Series(np.nan, index=df.index, dtype=float)
+        known = alcohol_values.notna()
+        df.loc[known, "alcohol_frequent"] = (alcohol_values.loc[known] >= 3).astype(int)
 
     return df
 
@@ -182,7 +196,7 @@ def process_genetic_pcs(df: pd.DataFrame) -> pd.DataFrame:
     for index, column in enumerate(GENETIC_PC_COLUMNS, start=1):
         if column not in df.columns:
             raise ValueError(f"Required genetic PC column missing: {column}")
-        df[f"genetic_pc{index}_filled"] = safe_numeric(df[column]).fillna(safe_numeric(df[column]).median())
+        df[f"genetic_pc{index}_filled"] = safe_numeric(df[column])
     return df
 
 
@@ -229,7 +243,7 @@ def build_data_dictionary(missing_stats: dict[str, dict[str, float]], censor_dat
             "",
             "## Genetic PCs",
             "",
-            "- `genetic_pc1_filled` through `genetic_pc20_filled`: median-imputed genetic PCs",
+            "- `genetic_pc1_filled` through `genetic_pc20_filled`: compatibility column names for genetic PCs; missing values are preserved for model-specific complete-case fitting",
             "",
             "## Missingness indicators",
             "",
@@ -263,7 +277,8 @@ def main() -> None:
         if "Participant.ID" not in frame.columns:
             raise ValueError(f"`Participant.ID` missing from {name} input.")
 
-    merged = prot.merge(cov, on="Participant.ID", how="left").merge(prs, on="Participant.ID", how="left")
+    # Keep the H35.3 cohort as the anchor so downstream Cox analyses stay on the same study population.
+    merged = cov.merge(prot, on="Participant.ID", how="left").merge(prs, on="Participant.ID", how="left")
     required_core = ["Participant.ID", "target_y", "BL2Target_yrs"]
     missing_core = [column for column in required_core if column not in merged.columns]
     if missing_core:

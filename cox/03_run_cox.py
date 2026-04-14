@@ -77,9 +77,10 @@ def load_data(args: argparse.Namespace) -> tuple[pd.DataFrame, list[str], list[s
     if missing_m2:
         raise ValueError(f"Missing required Model 2 covariates: {missing_m2}")
 
-    m3_available = [column for column in M3_COVS if column in df.columns]
     m3_missing = [column for column in M3_COVS if column not in df.columns]
-    return df, proteins, M2_COVS, m3_available, m3_missing
+    if m3_missing:
+        raise ValueError(f"Missing required Model 3 covariates: {m3_missing}")
+    return df, proteins, M2_COVS, M3_COVS, m3_missing
 
 
 def fit_cox(df_fit: pd.DataFrame, protein: str) -> tuple[dict, list[str]]:
@@ -98,26 +99,21 @@ def fit_cox(df_fit: pd.DataFrame, protein: str) -> tuple[dict, list[str]]:
     return result, warning_messages
 
 
+def prepare_model_frame(
+    data: pd.DataFrame,
+    protein: str,
+    covariates: list[str],
+) -> pd.DataFrame:
+    cols = [TIME_COL, EVENT_COL, protein] + covariates
+    return data[cols].dropna().copy()
+
+
 def analyse_protein(
     protein: str,
     data: pd.DataFrame,
     m2_covs: list[str],
     m3_covs: list[str],
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    all_columns = list(dict.fromkeys([TIME_COL, EVENT_COL, protein] + m2_covs + m3_covs))
-    df = data[all_columns].dropna().copy()
-    if len(df) < 50 or int(df[EVENT_COL].sum()) < 5:
-        return [], [], [
-            {
-                "protein": protein,
-                "n_samples_complete_case": int(len(df)),
-                "n_events_complete_case": int(df[EVENT_COL].sum()),
-                "exclusion_reason": "insufficient_complete_case_samples_or_events",
-            }
-        ]
-
-    n_samples = int(len(df))
-    n_events = int(df[EVENT_COL].sum())
     models = [
         ("Model 1 - Unadjusted", []),
         ("Model 2 - Age + Sex", m2_covs),
@@ -126,10 +122,25 @@ def analyse_protein(
 
     results: list[dict] = []
     warning_rows: list[dict] = []
+    exclusion_rows: list[dict] = []
     for model_name, covariates in models:
-        cols = [TIME_COL, EVENT_COL, protein] + covariates
+        df_model = prepare_model_frame(data, protein, covariates)
+        n_samples = int(len(df_model))
+        n_events = int(df_model[EVENT_COL].sum()) if n_samples else 0
+        if n_samples < 50 or n_events < 5:
+            exclusion_rows.append(
+                {
+                    "protein": protein,
+                    "model": model_name,
+                    "n_samples_complete_case": n_samples,
+                    "n_events_complete_case": n_events,
+                    "exclusion_reason": "insufficient_complete_case_samples_or_events",
+                }
+            )
+            continue
+
         try:
-            fit_result, warning_messages = fit_cox(df[cols], protein)
+            fit_result, warning_messages = fit_cox(df_model, protein)
         except Exception as exc:  # pragma: no cover - numerical failures are data dependent
             warning_rows.append(
                 {
@@ -162,7 +173,7 @@ def analyse_protein(
                 }
             )
 
-    return results, warning_rows, []
+    return results, warning_rows, exclusion_rows
 
 
 def apply_multiple_testing(results_df: pd.DataFrame) -> pd.DataFrame:
