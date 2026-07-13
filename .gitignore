@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.ipynb_checkpoints/
+*.log
+*.tmp
+outputs/
+data/
+*.csv.gz
+outer_predictions.csv
+fold_assignments.csv
+run_config.json
+.coverage
+htmlcov/
